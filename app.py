@@ -1,94 +1,67 @@
+# app.py
+
 import streamlit as st
-import base64
-import requests
-import pandas as pd
-from io import BytesIO, StringIO
+from google import genai
+from PIL import Image
+import io
 
-# ✅ Load Gemini API key from Streamlit secrets
-API_KEY = st.secrets["GEMINI_API_KEY"]
+# --- Configuration & Initialization ---
 
-# ✅ Correct Gemini Pro Vision endpoint
-API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent"
+# 1. API Key Handling (Fixes your KeyError)
+try:
+    # Use the correct key name as defined in .streamlit/secrets.toml
+    API_KEY = st.secrets["GEMINI_API_KEY"]
+except KeyError:
+    st.error("🚨 API Key not found!")
+    st.warning("Please create a `.streamlit/secrets.toml` file with `GEMINI_API_KEY = 'YOUR_KEY'`")
+    st.stop() # Stop the app if the key is missing
 
-# ✅ Function to call Gemini API Vision Model with an image
-def extract_table_from_image(image_bytes):
-    base64_img = base64.b64encode(image_bytes).decode("utf-8")
+# 2. Gemini Client Initialization
+# This uses the official and current 'google-genai' SDK
+client = genai.Client(api_key=API_KEY)
+# We will use the model gemini-2.5-flash which is an excellent multimodal model
+MODEL_NAME = "gemini-2.5-flash" 
 
-    headers = {
-        "Content-Type": "application/json"
-    }
+# --- Streamlit UI and Logic ---
 
-    data = {
-        "contents": [
-            {
-                "parts": [
-                    {"text": "Extract table data from this image and return it as CSV format."},
-                    {
-                        "inlineData": {
-                            "mimeType": "image/jpeg",
-                            "data": base64_img
-                        }
-                    }
-                ]
-            }
-        ]
-    }
+st.title("🖼️ Gemini Image Describer")
+st.caption(f"Powered by Google Gemini and {MODEL_NAME}")
+st.divider()
 
-    response = requests.post(f"{API_URL}?key={API_KEY}", headers=headers, json=data)
+# File Uploader
+uploaded_file = st.file_uploader(
+    "Upload an image (JPG, PNG) to analyze:", 
+    type=["png", "jpg", "jpeg"]
+)
 
-    if response.status_code == 200:
-        try:
-            reply = response.json()
-            csv_text = reply['candidates'][0]['content']['parts'][0]['text']
-            return csv_text
-        except Exception as e:
-            st.error("✅ API worked but couldn't parse CSV text. Please try a simpler image.")
-            return None
-    else:
-        st.error(f"❌ Gemini API Error: {response.status_code}")
-        return None
+# Text Input for the prompt
+prompt = st.text_input(
+    "What question do you have about the image?",
+    value="Describe this image in a fun and informative way.",
+)
 
-# ✅ CSV text to Excel file
-def csv_text_to_excel(csv_text):
-    try:
-        df = pd.read_csv(StringIO(csv_text))
-        output = BytesIO()
-        df.to_excel(output, index=False, engine='openpyxl')
-        output.seek(0)
-        return output
-    except Exception:
-        st.error("❌ Failed to convert CSV to Excel. The format returned by AI may be incorrect.")
-        return None
-
-# ---------------------------------
-# ✅ Streamlit App UI Starts Here
-# ---------------------------------
-
-st.set_page_config(page_title="Image to Excel Converter", layout="centered")
-
-st.title("📸 Image to Excel Converter")
-st.markdown("Upload an image of a **table or document** (JPG or PNG). It will be processed by AI to extract data and convert it to Excel. Powered by **Gemini AI**.")
-
-uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
-
+# Execute Button
 if uploaded_file is not None:
-    if st.button("🚀 Convert to Excel"):
-        with st.spinner("Processing image and extracting data..."):
-            image_bytes = uploaded_file.read()
+    # Display the uploaded image
+    image_data = uploaded_file.read()
+    image = Image.open(io.BytesIO(image_data))
+    st.image(image, caption='Image uploaded.', use_column_width=True)
 
-            # Send to Gemini
-            csv_text = extract_table_from_image(image_bytes)
-
-            if csv_text:
-                st.success("✅ Table extracted from image!")
-                st.text_area("📝 Extracted CSV Preview", csv_text, height=250)
-
-                excel_file = csv_text_to_excel(csv_text)
-
-                if excel_file:
-                    st.download_button(
-                        label="📥 Download Excel File",
-                        data=excel_file,
-                        file_name="output.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    if st.button("Generate Description", type="primary"):
+        if prompt:
+            with st.spinner('Analyzing image with Gemini...'):
+                try:
+                    # 3. Model Call (Uses the current SDK and recommended model)
+                    response = client.models.generate_content(
+                        model=MODEL_NAME, 
+                        contents=[prompt, image] # Multimodal input: text and image
                     )
+                    
+                    st.subheader("Gemini's Response:")
+                    st.markdown(response.text)
+                    
+                except Exception as e:
+                    st.error(f"An API error occurred: {e}")
+                    st.info("Check your API key and model name, or if you've hit a rate limit.")
+        else:
+            st.warning("Please enter a question about the image.")
