@@ -2,21 +2,17 @@ import streamlit as st
 import base64
 import requests
 import pandas as pd
-from io import BytesIO
+from io import BytesIO, StringIO
 
-# Load Gemini API Key from secrets (never push in repo)
-API_KEY = st.secrets.get("GEMINI_API_KEY", "YOUR_API_KEY_HERE")
+# ✅ Load Gemini API key from Streamlit secrets
+API_KEY = st.secrets["GEMINI_API_KEY"]
 
-# URL for Gemini Pro Vision
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent"
+# ✅ Correct Gemini Pro Vision endpoint
+API_URL = "https://generativelanguage.googleapis.com/v1/models/gemini-pro-vision:generateContent"
 
-# Function to encode image to base64
-def encode_image(image_file):
-    return base64.b64encode(image_file.read()).decode("utf-8")
-
-# Function to call Gemini API
+# ✅ Function to call Gemini API Vision Model with an image
 def extract_table_from_image(image_bytes):
-    base64_image = base64.b64encode(image_bytes).decode("utf-8")
+    base64_img = base64.b64encode(image_bytes).decode("utf-8")
 
     headers = {
         "Content-Type": "application/json"
@@ -26,13 +22,11 @@ def extract_table_from_image(image_bytes):
         "contents": [
             {
                 "parts": [
-                    {
-                        "text": "Extract table data from this image and return CSV:"
-                    },
+                    {"text": "Extract table data from this image and return it as CSV format."},
                     {
                         "inlineData": {
                             "mimeType": "image/jpeg",
-                            "data": base64_image
+                            "data": base64_img
                         }
                     }
                 ]
@@ -40,56 +34,56 @@ def extract_table_from_image(image_bytes):
         ]
     }
 
-    response = requests.post(
-        f"{API_URL}?key={API_KEY}",
-        headers=headers,
-        json=data
-    )
+    response = requests.post(f"{API_URL}?key={API_KEY}", headers=headers, json=data)
 
     if response.status_code == 200:
         try:
-            content = response.json()['candidates'][0]['content']['parts'][0]['text']
-            return content
+            reply = response.json()
+            csv_text = reply['candidates'][0]['content']['parts'][0]['text']
+            return csv_text
         except Exception as e:
-            st.error("Failed to parse Gemini response")
-            return ""
+            st.error("✅ API worked but couldn't parse CSV text. Please try a simpler image.")
+            return None
     else:
-        st.error(f"Gemini API Error: {response.status_code}")
-        return ""
+        st.error(f"❌ Gemini API Error: {response.status_code}")
+        return None
 
-# Convert CSV text to Excel file
+# ✅ CSV text to Excel file
 def csv_text_to_excel(csv_text):
-    from io import StringIO
     try:
         df = pd.read_csv(StringIO(csv_text))
         output = BytesIO()
-        df.to_excel(output, index=False)
+        df.to_excel(output, index=False, engine='openpyxl')
         output.seek(0)
         return output
-    except Exception as e:
-        st.error("Unable to convert CSV to Excel. Check format.")
+    except Exception:
+        st.error("❌ Failed to convert CSV to Excel. The format returned by AI may be incorrect.")
         return None
 
-# Streamlit UI
-st.set_page_config(page_title="Image to Excel App", layout="centered")
-st.title("📊 Image to Excel Converter")
+# ---------------------------------
+# ✅ Streamlit App UI Starts Here
+# ---------------------------------
 
-st.markdown("Upload an image of a table or document. The AI will extract data and convert it to Excel format.")
+st.set_page_config(page_title="Image to Excel Converter", layout="centered")
 
-uploaded_file = st.file_uploader("Upload Image (JPG, PNG)", type=["jpg", "jpeg", "png"])
+st.title("📸 Image to Excel Converter")
+st.markdown("Upload an image of a **table or document** (JPG or PNG). It will be processed by AI to extract data and convert it to Excel. Powered by **Gemini AI**.")
+
+uploaded_file = st.file_uploader("📤 Upload Image", type=["jpg", "jpeg", "png"])
 
 if uploaded_file is not None:
-    if st.button("Convert to Excel"):
-        with st.spinner("Processing... Please wait ⏳"):
+    if st.button("🚀 Convert to Excel"):
+        with st.spinner("Processing image and extracting data..."):
             image_bytes = uploaded_file.read()
 
-            csv_output = extract_table_from_image(image_bytes)
+            # Send to Gemini
+            csv_text = extract_table_from_image(image_bytes)
 
-            if csv_output:
-                st.success("✅ Table data extracted.")
-                st.text_area("Extracted CSV Preview", csv_output, height=250)
+            if csv_text:
+                st.success("✅ Table extracted from image!")
+                st.text_area("📝 Extracted CSV Preview", csv_text, height=250)
 
-                excel_file = csv_text_to_excel(csv_output)
+                excel_file = csv_text_to_excel(csv_text)
 
                 if excel_file:
                     st.download_button(
